@@ -4,7 +4,7 @@ from time import sleep
 from film import FilmwebFilm
 from person import Person
 
-def main():
+def full_scrape():
   best_films = 'https://www.filmweb.pl/ranking/film'
 
   browser = webdriver.Firefox()
@@ -12,9 +12,9 @@ def main():
   browser.get(best_films)
   browser.find_element(By.XPATH, '//*[@id="didomi-notice-agree-button"]').click()
 
-  film_list = browser.find_element(By.XPATH, '/html/body/div[5]/div[4]/div[2]/div/div[3]/section[1]/div[2]')
+  film_list = browser.find_element(By.CLASS_NAME, 'rankingTypeSection__container')
 
-  for _ in range(0):
+  for _ in range(1):
     browser.execute_script(f'window.scrollTo(0, {film_list.location["y"] + film_list.size["height"]})')
     browser.execute_script(f'window.scrollBy(0, -100)')
     browser.execute_script(f'window.scrollBy(0, -100)')
@@ -42,7 +42,7 @@ def main():
   # films.append(get_film_from_link(browser, links[0]))
   print("---FILMS---")
   for i, link in enumerate(links[:5]):
-    films.append(get_film_from_link(browser, link))
+    films.append(get_film_from_link(browser, link, id=i+1))
     print(f'{i+1}/{len(links)}: {browser.title}')
   
   genre_names = set()
@@ -54,7 +54,7 @@ def main():
     genre_names.add(film.genre)
     director_links.add(film.director_link)
     creator_links.add(film.writer_link)
-    for role in film.roles:
+    for role in film.roles[:3]:
       actor_links.add(role[1])
   actors = []
   directors = []
@@ -63,31 +63,111 @@ def main():
   browser.implicitly_wait(10)
   print("---ACTORS---")
   for i, actor_link in enumerate(actor_links):
-    actor = get_person_from_link(browser, actor_link)
+    actor = get_person_from_link(browser, actor_link, id=i+1)
     if actor != None:
       actors.append(actor)
-    print(f"{i+1}/{len(actor_links)}: {actors[-1]}")
+      print(f"{i+1}/{len(actor_links)}: {actors[-1]}")
   
   print("---DIRECTORS---")
   for i, director_link in enumerate(director_links):
-    director = get_person_from_link(browser, director_link)
+    director = get_person_from_link(browser, director_link, id=i+1)
     if director != None:
       directors.append(director)
     print(f"{i+1}/{len(director_links)}: {directors[-1]}")
   
   print("---CREATORS---")
   for i, writer_link in enumerate(creator_links):
-    writer = get_person_from_link(browser, writer_link)
+    writer = get_person_from_link(browser, writer_link, id=i+1)
     if writer != None:
       writers.append(writer)
     print(f"{i+1}/{len(creator_links)}: {writers[-1]}")
   
+  print('---GENRE INSERTS---')
   genre_inserts(genre_names)
+  print('---DIRECTOR INSERTS---')
   director_inserts(directors)
+  print('---CREATOR INSERTS---')
   creators_inserts(writers)
+  print('---ACTOR INSERTS---')
   actors_inserts(actors)
+  print('---FILM INSERTS---')
+  film_inserts(films, directors, writers)
+  print('---ROLE INSERTS---')
+  role_inserts(films, actors)
 
-  
+  get_example_data_together()
+
+def get_example_data_together():
+  file_names = [
+    "genres",
+    "creators",
+    "directors",
+    "actors",
+    "films",
+    "roles"
+  ]
+
+  output_lines = []
+
+  for name in file_names:
+    output_lines.append(f"\n\n---{name}\n\n")
+    file = open(f"data/{name}.sql", "r", encoding='utf8')
+    lines = file.readlines()
+    file.close()
+    output_lines.extend(lines)
+  file = open("data/example_data.sql", "w", encoding="utf8")
+  file.writelines(output_lines)
+  file.close()
+
+
+def film_inserts(films: list[FilmwebFilm], directors: list[Person], writers: list[Person]):
+  lines = [
+    "INSERT INTO filmy (id_filmu, tytul, data_wydania, id_rezysera, id_scenarzysty, gatunek, czas_trwania, kraj_produkcji, opis) VALUES"
+  ]
+  for i, film in enumerate(films):
+    can_be_inserted = True
+    director = [d for d in directors if d.filmweb_link == film.director_link]
+    if len(director) > 0:
+      director = director[0].id
+    else:
+      can_be_inserted = False
+      print(f"You have to insert director and their id manually for film: {film.title}, director link: {film.director_link}")
+      print(film)
+    writer = [w for w in writers if w.filmweb_link == film.writer_link]
+    if len(writer) > 0:
+      writer = writer[0].id
+    else:
+      can_be_inserted = False
+      print(f"You have to insert writer and their id manually for film: {film.title}, writer link: {film.writer_link}")
+    if not can_be_inserted:
+      continue
+    lines.append(f"\n({film.id}, '{film.title}', '{film.premiere_date}', {director}, {writer}, '{film.genre}', {film.length}, '{film.country}', '{film.description}')" + ("," if i != len(films)-1 else ";"))
+  file = open('data/films.sql', 'w', encoding='utf8')
+  file.writelines(lines)
+  file.close
+
+def role_inserts(films: list[FilmwebFilm], actors: list[Person]):
+  lines = [
+    'INSERT INTO role (nazwa_roli, id_aktora, id_filmu) VALUES'
+  ]
+
+  for film in films:
+    for role in film.roles:
+      actor = [a for a in actors if a.filmweb_link == role[1]]
+      if len(actor) > 0:
+        actor = actor[0].id
+      else:
+        print(f"Actor with link '{role[1]}' not found for film: ")
+        print(film.title)
+        print("Insert them manually")
+        continue
+      lines.append(f"\n('{role[0]}', {actor}, {film.id}),")
+  file = open("data/roles.sql", "w", encoding="utf8")
+  file.writelines(lines)
+  file.close()
+  print("Roles saved, remember to change last comma for a semi-colon (',' -> ';')")  
+
+
 def genre_inserts(names: set):
   lines = [
     'INSERT INTO gatunki (nazwa_gatunku, opis_gatunku) VALUES'
@@ -106,7 +186,7 @@ def director_inserts(directors: list):
   ]
   
   for i, director in enumerate(directors):
-    lines.append(f"\n({i+1}, '{director.first_name}', '{director.surname}', '{director.birth_date}', '{director.country}')" + ("," if i != len(directors)-1 else ";"))
+    lines.append(f"\n({director.id}, '{director.first_name}', '{director.surname}', '{director.birth_date}', '{director.country}')" + ("," if i != len(directors)-1 else ";"))
 
   file = open('data/directors.sql', 'w', encoding='utf8')
   file.writelines(lines)
@@ -119,7 +199,7 @@ def creators_inserts(creators: list):
   ]
   
   for i, creator in enumerate(creators):
-    lines.append(f"\n({i+1}, '{creator.first_name}', '{creator.surname}', '{creator.birth_date}', '{creator.country}')" + ("," if i != len(creators)-1 else ";"))
+    lines.append(f"\n({creator.id}, '{creator.first_name}', '{creator.surname}', '{creator.birth_date}', '{creator.country}')" + ("," if i != len(creators)-1 else ";"))
 
   file = open('data/creators.sql', 'w', encoding='utf8')
   file.writelines(lines)
@@ -131,13 +211,13 @@ def actors_inserts(actors: list):
   ]
   
   for i, actor in enumerate(actors):
-    lines.append(f"\n({i+1}, '{actor.first_name}', '{actor.surname}', '{actor.birth_date}', '{actor.country}')" + ("," if i != len(actors)-1 else ";"))
+    lines.append(f"\n({actor.id}, '{actor.first_name}', '{actor.surname}', '{actor.birth_date}', '{actor.country}')" + ("," if i != len(actors)-1 else ";"))
 
   file = open('data/actors.sql', 'w', encoding='utf8')
   file.writelines(lines)
   file.close()
 
-def get_film_from_link(browser: webdriver.Firefox , link: str) -> FilmwebFilm:
+def get_film_from_link(browser: webdriver.Firefox , link: str, id: int) -> FilmwebFilm:
   browser.get(link)
   
   title_class = "filmCoverSection__title"
@@ -168,9 +248,9 @@ def get_film_from_link(browser: webdriver.Firefox , link: str) -> FilmwebFilm:
     role_name = actor.find_element(By.CLASS_NAME, "simplePoster__character").text
     roles.append((role_name, actor_link))
 
-  return FilmwebFilm(title, date_published, duration_mins, country, description, genre, director_link, creator_link, roles)
+  return FilmwebFilm(id, title, date_published, duration_mins, country, description, genre, director_link, creator_link, roles, link)
 
-def get_person_from_link(browser: webdriver.Firefox , link: str) -> Person:
+def get_person_from_link(browser: webdriver.Firefox , link: str, id: int) -> Person:
   browser.get(link)
   name = ""
   birth_date = ""
@@ -187,8 +267,9 @@ def get_person_from_link(browser: webdriver.Firefox , link: str) -> Person:
   surname = name[-2]
   birth_place = birth_place.split(', ')[-1]
 
-  return Person(first_name, surname, birth_date, birth_place, link)
+  return Person(id, first_name, surname, birth_date, birth_place, link)
 
 
 if __name__ == '__main__':
-  main()
+  # full_scrape()
+  get_example_data_together()

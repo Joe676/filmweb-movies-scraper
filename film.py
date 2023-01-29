@@ -3,6 +3,8 @@ from datetime import date
 
 @dataclass
 class FilmwebFilm:
+  id: int
+
   title: str
   premiere_date: date
   length: int
@@ -13,3 +15,5 @@ class FilmwebFilm:
   director_link: str
   writer_link: str
   roles: list #(role_name, actor_link)
+
+  filmweb_link: str
